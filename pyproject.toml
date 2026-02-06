@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+# requires = ["flit_core >=3.2,<4"]
+# build-backend = "flit_core.buildapi"
+
+[project]
+name = "blink_detection"
+version = "0.0.1"
+description = "Blink detection using MediaPipe and OpenCV"
+license = { file = "LICENSE" }
+readme = "README.md"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+]
+requires-python = ">=3.10,<3.13"
+
+[tool.setuptools.packages.find]
+where = ["."] # Look for packages in the current directory (project root)
+# Optionally include/exclude specific top-level directories if needed
+
+[tool.ruff]
+line-length = 99
+target-version = "py312"
+
+[tool.ruff.format]
+
+# Like Black, use double quotes for strings.
+quote-style = "double"
+
+# Like Black, indent with spaces, rather than tabs.
+indent-style = "space"
+
+# Like Black, respect magic trailing commas.
+skip-magic-trailing-comma = false
+
+# Like Black, automatically detect the appropriate line ending.
+line-ending = "auto"
+
+# The following libraries don't have type stubs, so we ignore them in mypy checks.
+[tool.mypy]
+[[tool.mypy.overrides]]
+module = "mediapipe.*"
+ignore_missing_imports = true

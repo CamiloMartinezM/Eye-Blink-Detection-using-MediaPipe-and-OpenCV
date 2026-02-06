@@ -3,3 +3,5 @@ mediapipe
 numpy
 tensorflow
 matplotlib
+cyclopts
+loguru
