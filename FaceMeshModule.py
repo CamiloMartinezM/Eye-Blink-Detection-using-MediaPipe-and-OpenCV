@@ -1,143 +1,220 @@
-import cv2 as cv
-import mediapipe as mp
+"""A module to generate face mesh visualizations using MediaPipe's modern Tasks API.
+
+This is used by blink_annotator.py for landmark detection.
+"""
+
 import os
+import urllib.request
+from typing import Dict, Optional, Tuple
+
+import cv2
+import mediapipe as mp
+import numpy as np
+from mediapipe.tasks import python
+from mediapipe.tasks.python import vision
+from mediapipe.tasks.python.vision import drawing_styles, drawing_utils
 
 
 class FaceMeshGenerator:
-    def __init__(self, mode=False, num_faces=2, min_detection_con=0.5, min_track_con=0.5):
+    """
+    A class to detect face landmarks using the modern MediaPipe Tasks API.
+    """
+
+    def __init__(
+        self,
+        model_path: str = "face_landmarker.task",
+        num_faces: int = 2,
+        min_detection_con: float = 0.5,
+        min_track_con: float = 0.5,
+        running_mode=vision.RunningMode.IMAGE,
+    ) -> None:
         """
-        Initialize FaceMesh detector with specified parameters
+        Initialize the FaceLandmarker detector.
+
+        Args:
+            model_path: Path to the .task model file.
+            num_faces: Maximum number of faces to detect.
+            min_detection_con: Minimum confidence score for face detection.
+            min_track_con: Minimum confidence score for face presence (tracking).
+            running_mode: MediaPipe running mode (IMAGE, VIDEO, or LIVE_STREAM).
         """
+        if not os.path.exists(model_path):
+            print(f"Model not found at {model_path}. Downloading...")
+            url = "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task"
+            try:
+                urllib.request.urlretrieve(url, model_path)
+                print("Download complete.")
+            except Exception as e:
+                raise RuntimeError(f"Failed to download model: {e}")
+
         try:
-            self.results = None
-            self.mode = mode
-            self.num_faces = num_faces
-            self.min_detection_con = min_detection_con
-            self.min_track_con = min_track_con
-
-            self.mp_faceDetector = mp.solutions.face_mesh
-            self.face_mesh = self.mp_faceDetector.FaceMesh(
-                static_image_mode=self.mode,
-                max_num_faces=self.num_faces,
-                min_detection_confidence=self.min_detection_con,
-                min_tracking_confidence=self.min_track_con
+            self.running_mode = running_mode
+            base_options = python.BaseOptions(model_asset_path=model_path)
+            options = vision.FaceLandmarkerOptions(
+                base_options=base_options,
+                running_mode=self.running_mode,
+                num_faces=num_faces,
+                min_face_detection_confidence=min_detection_con,
+                min_face_presence_confidence=min_track_con,
+                output_face_blendshapes=False,
+                output_facial_transformation_matrixes=False,
             )
-
-            self.mp_Draw = mp.solutions.drawing_utils
-            self.drawSpecs = self.mp_Draw.DrawingSpec(thickness=1, circle_radius=2)
+            self.detector = vision.FaceLandmarker.create_from_options(options)
         except Exception as e:
-            raise RuntimeError(f"Failed to initialize FaceMeshGenerator: {str(e)}")
+            raise RuntimeError(f"Failed to initialize FaceLandmarker: {e}")
 
-    def create_face_mesh(self, frame, draw=True):
+    def create_face_mesh(
+        self, frame: np.ndarray, draw: bool = True, timestamp_ms: Optional[int] = None
+    ) -> Tuple[np.ndarray, Dict[int, Tuple[int, int]]]:
         """
-        Create face mesh landmarks for the given frame
-        Returns: processed frame and dictionary of landmarks
+        Process a frame to detect face landmarks.
+
+        Args:
+            frame: Input BGR image from OpenCV.
+            draw: Whether to draw mesh contours on the frame.
+            timestamp_ms: Required if running_mode is VIDEO.
+
+        Returns:
+            A tuple containing the processed frame and a dictionary mapping landmark IDs to (x, y) pixels.
         """
         if frame is None:
             raise ValueError("Input frame cannot be None")
 
         try:
-            frame_rgb = cv.cvtColor(frame, cv.COLOR_BGR2RGB)
-            self.results = self.face_mesh.process(frame_rgb)
+            # Convert BGR to RGB for MediaPipe
+            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=frame_rgb)
+
+            # Perform detection
+            if self.running_mode == vision.RunningMode.VIDEO:
+                if timestamp_ms is None:
+                    raise ValueError("timestamp_ms is required for VIDEO running mode")
+                detection_result = self.detector.detect_for_video(mp_image, timestamp_ms)
+            else:
+                detection_result = self.detector.detect(mp_image)
+
             landmarks_dict = {}
+            ih, iw, _ = frame.shape
 
-            if self.results.multi_face_landmarks:
-                for face_lms in self.results.multi_face_landmarks:
-                    if draw:
-                        self.mp_Draw.draw_landmarks(
-                            frame,
-                            face_lms,
-                            self.mp_faceDetector.FACEMESH_CONTOURS,
-                            self.drawSpecs,
-                            self.drawSpecs
+            if detection_result.face_landmarks:
+                # We process the first detected face for the landmark dictionary
+                # to maintain compatibility with existing blink detection logic
+                face_lms = detection_result.face_landmarks[0]
+                for idx, lm in enumerate(face_lms):
+                    x, y = int(lm.x * iw), int(lm.y * ih)
+                    landmarks_dict[idx] = (x, y)
+
+                if draw:
+                    for face_landmarks in detection_result.face_landmarks:
+                        # Draw tessellation
+                        drawing_utils.draw_landmarks(
+                            image=frame,
+                            landmark_list=face_landmarks,
+                            connections=vision.FaceLandmarksConnections.FACE_LANDMARKS_TESSELATION,
+                            landmark_drawing_spec=None,
+                            connection_drawing_spec=drawing_styles.get_default_face_mesh_tesselation_style(),
                         )
-
-                    # Convert normalized landmarks to pixel coordinates
-                    ih, iw, _ = frame.shape
-                    for ID, lm in enumerate(face_lms.landmark):
-                        x, y = int(lm.x * iw), int(lm.y * ih)
-                        landmarks_dict[ID] = (x, y)
+                        # Draw contours
+                        drawing_utils.draw_landmarks(
+                            image=frame,
+                            landmark_list=face_landmarks,
+                            connections=vision.FaceLandmarksConnections.FACE_LANDMARKS_CONTOURS,
+                            landmark_drawing_spec=None,
+                            connection_drawing_spec=drawing_styles.get_default_face_mesh_contours_style(),
+                        )
 
             return frame, landmarks_dict
         except Exception as e:
-            raise RuntimeError(f"Error processing frame: {str(e)}")
+            raise RuntimeError(f"Error processing frame: {e}")
+
+    def close(self) -> None:
+        """Release the detector resources."""
+        self.detector.close()
 
 
-def generate_face_mesh(video_path, resizing_factor, save_video=False, filename=None):
+def generate_face_mesh(
+    video_path: str | int,
+    resizing_factor: float,
+    save_video: bool = False,
+    filename: Optional[str] = None,
+    codec: str = "mp4v",
+) -> None:
     """
-    Process video stream and generate face mesh
+    Process video stream and generate face mesh visualization.
+
     Args:
-        video_path: Path to video file or 0 for webcam
-        resizing_factor: Factor to resize output display
-        save_video: Boolean to enable video saving
-        filename: Output video filename
+        video_path: Path to video file or 0 for webcam.
+        resizing_factor: Factor to resize output display.
+        save_video: Boolean to enable video saving.
+        filename: Output video filename.
     """
+    cap = None
+    out = None
     try:
-        # Initialize video capture
-        cap = cv.VideoCapture(0 if video_path == 0 else video_path)
+        cap = cv2.VideoCapture(0 if video_path == 0 else video_path)
         if not cap.isOpened():
             raise RuntimeError("Failed to open video capture")
 
-        # Get video properties
-        f_w, f_h, fps = (int(cap.get(x)) for x in (
-                cv.CAP_PROP_FRAME_WIDTH,
-                cv.CAP_PROP_FRAME_HEIGHT,
-                cv.CAP_PROP_FPS
-            ))
+        f_w, f_h, fps = (
+            int(cap.get(x))
+            for x in (cv2.CAP_PROP_FRAME_WIDTH, cv2.CAP_PROP_FRAME_HEIGHT, cv2.CAP_PROP_FPS)
+        )
 
-        # Initialize video writer if saving is enabled
-        out = None
         if save_video:
             if not filename:
                 raise ValueError("Filename must be provided when save_video is True")
-            
-            video_dir = r"D:\PyCharm\PyCharm_files\MEDIAPIPE\FACE_MESH\VIDEOS"
-            if not os.path.exists(video_dir):
-                os.makedirs(video_dir)
-                
-            save_path = os.path.join(video_dir, filename)
-            fourcc = cv.VideoWriter_fourcc(*"mp4v")
-            out = cv.VideoWriter(save_path, fourcc, fps, (f_w, f_h))
 
-        mesh_generator = FaceMeshGenerator()
+            video_dir = "DATA/VIDEOS/OUTPUTS"
+            os.makedirs(video_dir, exist_ok=True)
+            save_path = os.path.join(video_dir, filename)
+            fourcc = cv2.VideoWriter.fourcc(*codec)
+            out = cv2.VideoWriter(save_path, fourcc, fps, (f_w, f_h))
+
+        # Use VIDEO mode for better tracking performance in video streams
+        mesh_generator = FaceMeshGenerator(running_mode=vision.RunningMode.VIDEO)
 
         while cap.isOpened():
             ret, frame = cap.read()
             if not ret:
                 break
 
-            frame, landmarks_dict = mesh_generator.create_face_mesh(frame)
+            # Calculate timestamp in milliseconds
+            timestamp_ms = int(cap.get(cv2.CAP_PROP_POS_MSEC))
+
+            frame, _ = mesh_generator.create_face_mesh(frame, draw=True, timestamp_ms=timestamp_ms)
 
             if save_video and out is not None:
                 out.write(frame)
 
             if video_path == 0:
-                frame = cv.flip(frame, 1)
+                frame = cv2.flip(frame, 1)
 
-            # Ensure resizing factor is valid
             if resizing_factor <= 0:
                 raise ValueError("Resizing factor must be positive")
 
-            resized_frame = cv.resize(frame, (int(f_w * resizing_factor), int(f_h * resizing_factor)))
-            cv.imshow('Video', resized_frame)
-            
-            # Break loop if 'p' is pressed
-            if cv.waitKey(1) & 0xff == ord('p'):
+            display_w = int(f_w * resizing_factor)
+            display_h = int(f_h * resizing_factor)
+            resized_frame = cv2.resize(frame, (display_w, display_h))
+            cv2.imshow("Face Mesh Detection", resized_frame)
+
+            if cv2.waitKey(1) & 0xFF == ord("p"):
                 break
 
+        mesh_generator.close()
+
     except Exception as e:
-        print(f"Error during video processing: {str(e)}")
-    
+        print(f"Error during video processing: {e}")
+
     finally:
-        # Clean up resources
         if cap is not None:
             cap.release()
         if out is not None:
             out.release()
-        cv.destroyAllWindows()
+        cv2.destroyAllWindows()
+
 
 if __name__ == "__main__":
-    video_path = 0
-    resizing_factor = 1 if video_path == 0 else 0.5
-    generate_face_mesh(video_path, resizing_factor)
-
+    # Ensure 'face_landmarker.task' is in the project root before running
+    input_path = 0
+    scale = 1.0 if input_path == 0 else 0.5
+    generate_face_mesh(input_path, scale)
