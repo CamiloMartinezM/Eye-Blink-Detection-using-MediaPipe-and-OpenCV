@@ -164,7 +164,7 @@ def generate_face_mesh(
             if not filename:
                 raise ValueError("Filename must be provided when save_video is True")
 
-            video_dir = "DATA/VIDEOS/OUTPUTS"
+            video_dir = "data/videos/outputs"
             os.makedirs(video_dir, exist_ok=True)
             save_path = os.path.join(video_dir, filename)
             fourcc = cv2.VideoWriter.fourcc(*codec)
