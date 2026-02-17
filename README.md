@@ -203,6 +203,63 @@ The included Jupyter notebook provides:
 - Comparative analysis of different threshold settings
 
 
+## 🎯 Professional Blink Annotator
+
+The project includes a robust annotation tool `blink_annotator.py` designed for data collection and batch processing.
+
+### ✨ Key Features
+- **Batch Processing**: Recursively search directory trees for video files.
+- **Rich Output**: Exports blink timestamps AND EAR values to both TXT and NPY formats.
+- **Post-Processing**: Optionally identifies the exact frame with the lowest EAR (most closed state) for each blink.
+- **Smart Filtering**: Supports Glob patterns (e.g., `*subject-01*`) and recursion depth limits.
+
+### 📝 Output Formats
+For a video named `video.mp4`, the tool generates:
+1. **`video_eyeblink.txt`**: Tab-separated `timestamp  ear` values.
+2. **`video_eyeblink.npy`**: NumPy array of shape `(N, 2)` containing `[timestamp, ear]`.
+3. **`video_eyeblink_viz.mp4`** (Optional): Visualization video with EAR plots.
+
+**With/Without Post-processing:**
+- Default: Outputs the *midpoint* timestamp of the blink duration.
+- With `--postprocess`: Additionally saves `*_postprocessed.txt/.npy` containing the timestamp of the *minimum EAR* (most closed eye) within that blink.
+
+### 🚀 Usage Examples
+
+**1. Single Video Mode**
+```bash
+python blink_annotator.py data/inputs/video.mp4 --save-video
+```
+
+**2. Batch Processing Mode**
+Process all videos in a directory tree, searching 2 levels deep:
+```bash
+python blink_annotator.py --input-dir data/face_recordings --depth 2
+```
+
+**3. Advanced Batch Processing**
+Process only "subject-01" videos, force overwrite existing files, and generate post-processed data:
+```bash
+python blink_annotator.py \
+    --input-dir data/raw \
+    --pattern "*subject-01*" \
+    --postprocess \
+    --force
+```
+
+### ⚙️ CLI Options
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--ear-threshold` | 0.22 | EAR value below which eyes are considered closed |
+| `--consec-frames` | 2 | Minimum consecutive frames to count as a blink |
+| `--postprocess` | False | Find the frame with lowest EAR per blink |
+| `--save-video` | False | Generate visualization video |
+| `--quick-test` | False | Process only first 5 seconds |
+| `--depth` | None | Recursion depth for input directory (0=root) |
+| `--pattern` | None | Glob pattern to filter filenames |
+| `--force` | False | Overwrite existing output files |
+| `--dry-run` | False | Visualize tree and exit without processing |
+
 ---
 
 ## References
